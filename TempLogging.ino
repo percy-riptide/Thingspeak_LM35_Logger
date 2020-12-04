@@ -1,73 +1,86 @@
-#include <SoftwareSerial.h>
-
-// Access point SSID and Password (change it with your SSID and Password)
-char ssid[] = "Percy";
-char pass[] = "yolo@1590";
+#include<stdlib.h>
 
 // Your channel's thingspeak API key (change it to your API key)
 String apiKey = "JYVRWE17MR5R5ZPI";
 
-int lm35Pin = A0;
+//SSID and password (change it to your SSID and Pass)
+char ssid[] = "Percy";
+char pass[] = "yolo@1590";
 
-// connect pin 2 to TX of Esp and pin 3 to RX of Esp
-SoftwareSerial esp8266(2,3);
-
+const int dataPin = A1;
+int value;
+float temp;
+const int groundPin = A0;
+const int powerPin = A2;
+String cmd;
+char x[]=">";
+char y[]="Error";
+  
 void setup(){                
   // enable debug serial
-  // sets the baud rate to 9600
-  Serial.begin(9600);
-   
-  // enable software serial
-  // sets the baud rate to 9600
-  esp8266.begin(9600);
+  // sets the baud rate to 115200
+  Serial.begin(115200);
 
-  // connect esp8266 to wifi
-  esp8266.println("AT+CWMODE=3"); // STA+AP mode 
-  String conn = "AT+CWJAP=\"";
-  conn += ssid;
-  conn += "\",\"";
-  conn += pass;
-  conn += "\"";
-  esp8266.println(conn);
+  // set pinmode to output
+  pinMode(groundPin, OUTPUT);
+  pinMode(powerPin, OUTPUT);
+
+  // make groundPin low(0V/GND) and powerPin high(5V)
+  digitalWrite(groundPin, LOW);
+  digitalWrite(powerPin, HIGH);
+
+  // set reference voltage to 1.1V
+  analogReference(INTERNAL);
   
-  // reset ESP8266
-  esp8266.println("AT+RST");
+  // connect esp8266 to access point
+  Serial.println("AT+CWMODE=3"); // STA+AP mode 
+  cmd = "AT+CWJAP=\"";
+  cmd += ssid;
+  cmd += "\",\"";
+  cmd += pass;
+  cmd += "\"";
+  Serial.println(cmd);
+  cmd = "";
+
+  // reset esp8266
+  Serial.println("AT+RST");
+
+  //set cpimux
+  Serial.println("AT+CIPMUX=0");
 }
 
 void loop(){
-  int val = 0;
-  char x[]=">";
-  char y[]="Error";
   // read the value from LM35.
-  val=analogRead(lm35Pin);
-  
-  // convert to actual temperature reading
-  // analog temp values range from 0-1023
-  // LM35 outputs 10mV/degree C. ie, 1 Volt => 100 degrees C
-  // So Temp = (avg_val/1023)*5 Volts * 100 degrees/Volt
-  // which is val*(500/1023) => val*0.489
-  float temp = val*0.489;
-  
-  // convert to string
+  value=analogRead(dataPin);
+
+  /*value range from 0-1023 (total of 1024)
+   *analogReference is set to internal which means 1.1V
+   *Each step in the analog reading is approximately equal to: 1.1/1024=0.001074218=1.0742 millivolts
+   *LM35 reports 1 degree Celsius per 10 millivolts
+   *This means for every (10/1.0742), we detect one degree change i.e., every 9.31
+   *Hence dividing by 9.31 gets temperature readings in Celsius*/
+  temp = value/9.31;
+    
+  // convert float value to string
   char buf[16];
   String strTemp = dtostrf(temp, 4, 1, buf);
   
   Serial.println(strTemp);
   
   // TCP connection
-  String cmd = "AT+CIPSTART=\"TCP\",\"";
-  cmd += "184.106.153.149"; // api.thingspeak.com
+  cmd = "AT+CIPSTART=\"TCP\",\"";
+  cmd += "api.thingspeak.com";
   cmd += "\",80";
-  // AT+CIPSTART=TCP,api.thingspeak.com,80 (TCP is connection type, api.thingspeak.com is same as the IP written above(184.106.153.149) and 80 is the port (CIPMUX=0 type connection))
-  esp8266.println(cmd);
+  Serial.println(cmd);
+  cmd = "";
    
-  if(esp8266.find(y)){
+  if(Serial.find(y)){
     Serial.println("AT+CIPSTART error");
     return;
   }
   
   // prepare GET string
-  String getStr = "GET /update?api_key=";
+  String getStr = "GET https://api.thingspeak.com/update?api_key=";
   getStr += apiKey;
   getStr +="&field1=";
   getStr += String(strTemp);
@@ -76,15 +89,16 @@ void loop(){
   // send data length
   cmd = "AT+CIPSEND=";
   cmd += String(getStr.length());
-  esp8266.println(cmd);
+  Serial.println(cmd);
+  cmd = "";
 
-  if(esp8266.find(x)){
-    esp8266.print(getStr);
+  if(Serial.find(x)){
+    Serial.print(getStr);
   }
   else{
-    esp8266.println("AT+CIPCLOSE");
+    Serial.println("AT+CIPCLOSE");
   }
   
   // thingspeak needs 15 sec delay between updates
-  delay(5000);  
+  delay(15000);  
 }
